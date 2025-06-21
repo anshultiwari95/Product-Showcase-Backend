@@ -4,12 +4,11 @@ const axios = require("axios");
 const router = express.Router();
 const BASE_URL = "https://dummyjson.com/products";
 
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
-const productCache = new Map(); // key: cacheKey, value: { data, timestamp }
+const CACHE_DURATION = 5 * 60 * 1000;
+const productCache = new Map();
 let categoryCache = null;
 let categoryLastFetched = 0;
 
-// 🔹 Helper to fetch all products (paginated)
 const fetchAllProducts = async (category = null) => {
   let allProducts = [];
   let skip = 0;
@@ -30,7 +29,6 @@ const fetchAllProducts = async (category = null) => {
   return allProducts;
 };
 
-// 🔹 GET /api/products
 router.get("/", async (req, res) => {
   try {
     let { limit = 12, skip = 0, sort, category } = req.query;
@@ -43,7 +41,6 @@ router.get("/", async (req, res) => {
 
     const cacheKey = `${category || "all"}|${sort || "none"}`;
 
-    // ✅ If sorting, fetch all and cache
     if (isSorting) {
       const cached = productCache.get(cacheKey);
       let allProducts;
@@ -72,11 +69,8 @@ router.get("/", async (req, res) => {
       });
     }
 
-    // ✅ No sort → direct paginated fetch
     const urlParams = new URLSearchParams({ limit, skip }).toString();
-    const endpoint = category
-      ? `${BASE_URL}/category/${category}`
-      : BASE_URL;
+    const endpoint = category ? `${BASE_URL}/category/${category}` : BASE_URL;
     const fullUrl = `${endpoint}?${urlParams}`;
 
     const response = await axios.get(fullUrl);
@@ -92,7 +86,6 @@ router.get("/", async (req, res) => {
   }
 });
 
-// 🔹 GET /api/products/:id
 router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -104,7 +97,6 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// 🔹 GET /api/products/categories/all
 router.get("/categories/all", async (req, res) => {
   try {
     if (categoryCache && Date.now() - categoryLastFetched < CACHE_DURATION) {
