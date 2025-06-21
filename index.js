@@ -5,7 +5,7 @@ const productRoutes = require("./routes/products");
 const app = express();
 
 const corsOptions = {
-  origin: "http://localhost:3001",
+  origin: "https://product-showcase-frontend.vercel.app",
   methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
 };
