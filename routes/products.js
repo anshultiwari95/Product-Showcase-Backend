@@ -17,40 +17,63 @@ let categoryLastFetched = 0;
 router.get("/", async (req, res) => {
   try {
     let { limit = 12, skip = 0, sort, category } = req.query;
+    limit = parseInt(limit);
+    skip = parseInt(skip);
+
+    const isSorting = sort === "price-low" || sort === "price-high";
+    const isAllCategory = !category || category === "all" || category === "All Categories";
+
     const urlParams = new URLSearchParams({ limit, skip }).toString();
     const endpoint = category ? `${BASE_URL}/category/${category}` : BASE_URL;
     const fullUrl = `${endpoint}?${urlParams}`;
-    const cacheKey = `${fullUrl}|${sort || "none"}`;
+    const cacheKey = `${endpoint}|${sort || "none"}`;
 
-    const cached = productCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-      return res.json(cached.data);
+    // ✅ If sorting is requested → fetch ALL items first, then sort & paginate
+    if (isSorting) {
+      const sortCacheKey = `${endpoint}|ALL`;
+
+      const cachedAll = productCache.get(sortCacheKey);
+      let allProducts;
+
+      if (cachedAll && Date.now() - cachedAll.timestamp < CACHE_DURATION) {
+        allProducts = cachedAll.data;
+      } else {
+        const fetchUrl = category ? `${BASE_URL}/category/${category}` : BASE_URL;
+        const allResponse = await axios.get(fetchUrl);
+        allProducts = allResponse.data.products;
+        productCache.set(sortCacheKey, { data: allProducts, timestamp: Date.now() });
+      }
+
+      const sorted = [...allProducts].sort((a, b) =>
+        sort === "price-low" ? a.price - b.price : b.price - a.price
+      );
+
+      const paginated = sorted.slice(skip, skip + limit);
+
+      return res.json({
+        total: sorted.length,
+        limit,
+        skip,
+        products: paginated,
+      });
     }
 
+    // ✅ No sorting → basic paginated fetch with optional category
     const response = await axios.get(fullUrl);
-    let products = response.data.products;
+    const products = response.data.products;
 
-    if (sort === "price-low") {
-      products = products.sort((a, b) => a.price - b.price);
-    } else if (sort === "price-high") {
-      products = products.sort((a, b) => b.price - a.price);
-    }
-
-    const result = {
+    return res.json({
       total: response.data.total,
-      limit: Number(limit),
-      skip: Number(skip),
+      limit,
+      skip,
       products,
-    };
-
-    productCache.set(cacheKey, { data: result, timestamp: Date.now() });
-
-    res.json(result);
+    });
   } catch (err) {
     console.error("❌ Error fetching products:", err.message);
     res.status(500).json({ error: "Failed to fetch products" });
   }
 });
+
 
 // 🔸 GET /api/products/:id
 router.get("/:id", async (req, res) => {
