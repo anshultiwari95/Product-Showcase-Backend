@@ -5,15 +5,32 @@ const router = express.Router();
 const BASE_URL = "https://dummyjson.com/products";
 
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
-
-// 🔹 Product list cache
-const productCache = new Map(); // key: query string + sort, value: { data, timestamp }
-
-// 🔹 Categories cache
+const productCache = new Map(); // key: cacheKey, value: { data, timestamp }
 let categoryCache = null;
 let categoryLastFetched = 0;
 
-// 🔸 GET /api/products
+// 🔹 Helper to fetch all products (paginated)
+const fetchAllProducts = async (category = null) => {
+  let allProducts = [];
+  let skip = 0;
+  const limit = 100;
+
+  while (true) {
+    const url = category
+      ? `${BASE_URL}/category/${category}?limit=${limit}&skip=${skip}`
+      : `${BASE_URL}?limit=${limit}&skip=${skip}`;
+
+    const response = await axios.get(url);
+    allProducts = allProducts.concat(response.data.products);
+    skip += limit;
+
+    if (skip >= response.data.total) break;
+  }
+
+  return allProducts;
+};
+
+// 🔹 GET /api/products
 router.get("/", async (req, res) => {
   try {
     let { limit = 12, skip = 0, sort, category } = req.query;
@@ -21,27 +38,24 @@ router.get("/", async (req, res) => {
     skip = parseInt(skip);
 
     const isSorting = sort === "price-low" || sort === "price-high";
-    const isAllCategory = !category || category === "all" || category === "All Categories";
+    const isAllCategory =
+      !category || category === "all" || category === "All Categories";
 
-    const urlParams = new URLSearchParams({ limit, skip }).toString();
-    const endpoint = category ? `${BASE_URL}/category/${category}` : BASE_URL;
-    const fullUrl = `${endpoint}?${urlParams}`;
-    const cacheKey = `${endpoint}|${sort || "none"}`;
+    const cacheKey = `${category || "all"}|${sort || "none"}`;
 
-    // ✅ If sorting is requested → fetch ALL items first, then sort & paginate
+    // ✅ If sorting, fetch all and cache
     if (isSorting) {
-      const sortCacheKey = `${endpoint}|ALL`;
-
-      const cachedAll = productCache.get(sortCacheKey);
+      const cached = productCache.get(cacheKey);
       let allProducts;
 
-      if (cachedAll && Date.now() - cachedAll.timestamp < CACHE_DURATION) {
-        allProducts = cachedAll.data;
+      if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+        allProducts = cached.data;
       } else {
-        const fetchUrl = category ? `${BASE_URL}/category/${category}` : BASE_URL;
-        const allResponse = await axios.get(fetchUrl);
-        allProducts = allResponse.data.products;
-        productCache.set(sortCacheKey, { data: allProducts, timestamp: Date.now() });
+        allProducts = await fetchAllProducts(isAllCategory ? null : category);
+        productCache.set(cacheKey, {
+          data: allProducts,
+          timestamp: Date.now(),
+        });
       }
 
       const sorted = [...allProducts].sort((a, b) =>
@@ -58,15 +72,19 @@ router.get("/", async (req, res) => {
       });
     }
 
-    // ✅ No sorting → basic paginated fetch with optional category
-    const response = await axios.get(fullUrl);
-    const products = response.data.products;
+    // ✅ No sort → direct paginated fetch
+    const urlParams = new URLSearchParams({ limit, skip }).toString();
+    const endpoint = category
+      ? `${BASE_URL}/category/${category}`
+      : BASE_URL;
+    const fullUrl = `${endpoint}?${urlParams}`;
 
+    const response = await axios.get(fullUrl);
     return res.json({
       total: response.data.total,
       limit,
       skip,
-      products,
+      products: response.data.products,
     });
   } catch (err) {
     console.error("❌ Error fetching products:", err.message);
@@ -74,8 +92,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-
-// 🔸 GET /api/products/:id
+// 🔹 GET /api/products/:id
 router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -87,7 +104,7 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// 🔸 GET /api/products/categories/all
+// 🔹 GET /api/products/categories/all
 router.get("/categories/all", async (req, res) => {
   try {
     if (categoryCache && Date.now() - categoryLastFetched < CACHE_DURATION) {
